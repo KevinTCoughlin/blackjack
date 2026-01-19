@@ -1,6 +1,20 @@
-# blackjack
+# Blackjack
 
-A Unix-philosophy blackjack game with a stateless CLI. The game state is fully serializable, allowing it to be piped between commands or stored/restored from files.
+A Unix-philosophy blackjack game with a stateless CLI.
+
+[![Crates.io](https://img.shields.io/crates/v/blackjack.svg)](https://crates.io/crates/blackjack)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q11SKIOF)
+
+## Features
+
+- **Stateless design** - Game state is fully serializable JSON, pipeable between commands
+- **Unix composable** - Chain commands: `bj new | bj hit | bj stand`
+- **Configurable rules** - Vegas strip defaults, customizable via TOML
+- **Colored output** - Red/black suits, colored outcomes (disable with `--no-color`)
+- **Demo mode** - Automated play with basic strategy for testing/demos
+- **Library + CLI** - Use as a Rust library or standalone CLI
 
 ## Installation
 
@@ -16,7 +30,7 @@ cd blackjack
 cargo install --path .
 ```
 
-## Usage
+## Quick Start
 
 ### Interactive Play
 
@@ -24,7 +38,9 @@ cargo install --path .
 bj play
 ```
 
-### Stateless Commands (Unix-style)
+Controls: `h`=hit, `s`=stand, `d`=double, `p`=split, `u`=surrender, `q`=quit
+
+### Unix-Style (Stateless)
 
 ```bash
 # Start a new game
@@ -33,7 +49,7 @@ bj new
 # Pipe state through actions
 bj new | bj hit | bj stand
 
-# Or use files
+# Save/restore game state
 bj new > game.json
 bj hit < game.json > game.json
 bj stand < game.json
@@ -41,60 +57,81 @@ bj stand < game.json
 
 ### Demo Mode
 
-Run automated games using basic strategy:
-
 ```bash
-# Single demo game
-bj demo
+# Run 100 games with basic strategy
+bj demo -n 100
 
-# Run 100 games and show statistics
-bj demo --count=100
-
-# Visual demo with delay
+# Visual demo with delay between actions
 bj demo --delay=500 --verbose
 
-# Reproducible run
-bj demo --seed=12345 --count=100
+# Reproducible results with seed
+bj demo --seed=12345 -n 100
 ```
 
-### Show Rules
+### Pretty Output
 
 ```bash
-bj rules
-bj rules --config=vegas.toml
+bj new -f pretty
+```
+
+```
+┌─────────────────────────────────────────┐
+│              BLACKJACK                  │
+├─────────────────────────────────────────┤
+│  Dealer: [??] [K♥]          Value: ?   │
+│                                         │
+│  You:    [A♠] [10♦]        Value: 21   │
+│                           BLACKJACK!    │
+├─────────────────────────────────────────┤
+│  [H]it [S]tand [D]ouble [U]surrender    │
+└─────────────────────────────────────────┘
 ```
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `new` | Start a new game (deal initial cards) |
-| `hit` | Take another card |
-| `stand` | Stop taking cards |
-| `double` | Double down |
-| `split` | Split a pair |
-| `surrender` | Surrender (give up half bet) |
-| `insurance` | Accept or decline insurance |
-| `play` | Interactive play mode |
-| `demo` | Automated play with basic strategy |
-| `rules` | Show current rules |
+| `bj new` | Start a new game (deal initial cards) |
+| `bj hit` | Take another card |
+| `bj stand` | Stop taking cards |
+| `bj double` | Double down |
+| `bj split` | Split a pair |
+| `bj surrender` | Surrender (forfeit half bet) |
+| `bj insurance` | Accept/decline insurance |
+| `bj play` | Interactive play mode |
+| `bj demo` | Automated play with basic strategy |
+| `bj rules` | Display current rules |
+
+### Global Options
+
+| Option | Description |
+|--------|-------------|
+| `--no-color` | Disable colored output |
+| `-f, --format` | Output format: `json` (default) or `pretty` |
+| `-c, --config` | Path to TOML config file |
+| `--seed` | Seed for reproducible shuffling |
 
 ## Configuration
 
-Create a TOML config file to customize rules:
+Create a TOML file to customize rules:
 
 ```toml
-# vegas.toml
+# vegas.toml - Vegas Strip rules
 num_decks = 6
 dealer_stands_soft_17 = true
 blackjack_pays = 1.5
+allow_double = true
+allow_split = true
 allow_surrender = true
 surrender_type = "late"
 ```
 
-Use with: `bj new --config=vegas.toml`
+```bash
+bj new --config=vegas.toml
+bj play --config=vegas.toml
+```
 
-### Available Options
+### All Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
@@ -103,37 +140,65 @@ Use with: `bj new --config=vegas.toml`
 | `dealer_stands_soft_17` | true | Dealer stands on soft 17 |
 | `dealer_peeks` | true | Dealer peeks for blackjack |
 | `allow_double` | true | Allow double down |
-| `double_on` | "any" | When doubling is allowed |
-| `allow_double_after_split` | true | Double after split |
+| `double_on` | "any" | "any", "9_to_11", "10_or_11", "11_only" |
+| `allow_double_after_split` | true | Allow double after split |
 | `allow_split` | true | Allow splitting pairs |
 | `max_splits` | 4 | Maximum hands from splits |
-| `allow_resplit_aces` | false | Resplit aces |
-| `allow_hit_split_aces` | false | Hit split aces |
+| `allow_resplit_aces` | false | Allow resplitting aces |
+| `allow_hit_split_aces` | false | Allow hitting split aces |
 | `allow_surrender` | true | Allow surrender |
 | `surrender_type` | "late" | "none", "late", or "early" |
 | `allow_insurance` | true | Allow insurance bet |
-| `blackjack_pays` | 1.5 | Blackjack payout (3:2 = 1.5) |
-| `insurance_pays` | 2.0 | Insurance payout (2:1) |
-| `five_card_charlie` | false | Five cards wins automatically |
+| `blackjack_pays` | 1.5 | Blackjack payout (3:2 = 1.5, 6:5 = 1.2) |
+| `insurance_pays` | 2.0 | Insurance payout |
+| `five_card_charlie` | false | Five cards auto-wins |
 
 ## Library Usage
 
 ```rust
 use blackjack::{GameState, GameConfig, Action};
 
-let mut game = GameState::new(GameConfig::default());
-game.apply(Action::Deal)?;
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Create game with default Vegas strip rules
+    let mut game = GameState::new(GameConfig::default());
 
-while !game.is_finished() {
-    let actions = game.available_actions();
-    // Choose an action...
-    game.apply(Action::Stand)?;
-}
+    // Deal initial cards
+    game.apply(Action::Deal)?;
 
-for outcome in &game.outcomes {
-    println!("{:?}: payout = {}", outcome.outcome, outcome.payout);
+    // Play the game
+    while !game.is_finished() {
+        let actions = game.available_actions();
+        if actions.is_empty() {
+            break;
+        }
+
+        // Your logic to choose an action
+        let action = actions[0].clone();
+        game.apply(action)?;
+    }
+
+    // Check outcomes
+    for outcome in &game.outcomes {
+        println!("Hand {}: {:?} (payout: {:.1}x)",
+            outcome.hand_index,
+            outcome.outcome,
+            outcome.payout
+        );
+    }
+
+    Ok(())
 }
 ```
+
+## WezTerm Plugin
+
+For a rich terminal UI experience, check out [wezterm-blackjack](https://github.com/KevinTCoughlin/wezterm-blackjack).
+
+## Support
+
+If you find this useful, consider supporting development:
+
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q11SKIOF)
 
 ## License
 
