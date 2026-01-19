@@ -45,5 +45,5 @@ pub use config::{ConfigError, DoubleRule, GameConfig, SurrenderType};
 pub use deck::Deck;
 pub use game::{Action, GameError, GamePhase, GameState, HandOutcome, Outcome};
 pub use hand::Hand;
-pub use output::{format_game_state, OutputFormat};
+pub use output::{format_game_state, is_color_enabled, set_color_enabled, OutputFormat};
 pub use strategy::{decide_action, Strategy};

@@ -2,9 +2,25 @@
 //!
 //! Supports JSON for machine-readable output and pretty text with card art.
 
-use crate::card::Card;
+use colored::Colorize;
+use std::sync::atomic::{AtomicBool, Ordering};
+
+use crate::card::{Card, Suit};
 use crate::game::{GamePhase, GameState, Outcome};
 use crate::hand::Hand;
+
+/// Global flag to control color output
+static USE_COLOR: AtomicBool = AtomicBool::new(true);
+
+/// Enable or disable colored output
+pub fn set_color_enabled(enabled: bool) {
+    USE_COLOR.store(enabled, Ordering::SeqCst);
+}
+
+/// Check if color is enabled
+pub fn is_color_enabled() -> bool {
+    USE_COLOR.load(Ordering::SeqCst)
+}
 
 /// Output format options.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -47,7 +63,7 @@ fn format_pretty(state: &GameState) -> String {
 
     // Dealer hand
     let dealer_str = format_dealer_hand(state);
-    output.push_str(&format!("│  Dealer: {:<31}│\n", dealer_str));
+    output.push_str(&format!("│  Dealer: {:<31}│\n", strip_ansi_for_padding(&dealer_str, 31)));
 
     // Dealer value
     let dealer_value = if state.is_finished() || matches!(state.phase, GamePhase::DealerTurn) {
@@ -68,7 +84,8 @@ fn format_pretty(state: &GameState) -> String {
         };
 
         let cards_str = format_hand_cards(hand);
-        output.push_str(&format!("│  {}{:<28}│\n", hand_label, cards_str));
+        let padded = strip_ansi_for_padding(&cards_str, 28);
+        output.push_str(&format!("│  {}{}│\n", hand_label, padded));
 
         // Hand status
         let status = format_hand_status(state, i, hand);
@@ -89,6 +106,57 @@ fn format_pretty(state: &GameState) -> String {
     output
 }
 
+/// Pads a string containing ANSI codes to a visual width
+fn strip_ansi_for_padding(s: &str, width: usize) -> String {
+    // Count visible characters (excluding ANSI escape sequences)
+    let visible_len = strip_ansi_codes(s).chars().count();
+    let padding = if width > visible_len {
+        width - visible_len
+    } else {
+        0
+    };
+    format!("{}{}", s, " ".repeat(padding))
+}
+
+/// Strips ANSI escape codes from a string
+fn strip_ansi_codes(s: &str) -> String {
+    let mut result = String::new();
+    let mut in_escape = false;
+
+    for c in s.chars() {
+        if c == '\x1b' {
+            in_escape = true;
+        } else if in_escape {
+            if c == 'm' {
+                in_escape = false;
+            }
+        } else {
+            result.push(c);
+        }
+    }
+
+    result
+}
+
+/// Formats a card with colored suit
+fn format_card_colored(card: &Card) -> String {
+    let rank_str = card.rank.symbol();
+    let suit_str = card.suit.symbol();
+
+    if is_color_enabled() {
+        match card.suit {
+            Suit::Hearts | Suit::Diamonds => {
+                format!("{}{}", rank_str, suit_str.red())
+            }
+            Suit::Spades | Suit::Clubs => {
+                format!("{}{}", rank_str, suit_str)
+            }
+        }
+    } else {
+        format!("{}{}", rank_str, suit_str)
+    }
+}
+
 /// Formats the dealer's hand, hiding the hole card if needed.
 fn format_dealer_hand(state: &GameState) -> String {
     if state.dealer_hand.is_empty() {
@@ -99,13 +167,13 @@ fn format_dealer_hand(state: &GameState) -> String {
 
     if state.is_finished() || matches!(state.phase, GamePhase::DealerTurn) {
         // Show all cards
-        format_cards(cards)
+        format_cards_colored(cards)
     } else {
         // Hide hole card
         let mut result = format_card_box("??");
         result.push(' ');
         if cards.len() > 1 {
-            result.push_str(&format_card_box(&cards[1].to_string()));
+            result.push_str(&format_card_box(&format_card_colored(&cards[1])));
         }
         result
     }
@@ -113,14 +181,14 @@ fn format_dealer_hand(state: &GameState) -> String {
 
 /// Formats a hand's cards.
 fn format_hand_cards(hand: &Hand) -> String {
-    format_cards(hand.cards())
+    format_cards_colored(hand.cards())
 }
 
-/// Formats a slice of cards.
-fn format_cards(cards: &[Card]) -> String {
+/// Formats a slice of cards with colors.
+fn format_cards_colored(cards: &[Card]) -> String {
     cards
         .iter()
-        .map(|c| format_card_box(&c.to_string()))
+        .map(|c| format_card_box(&format_card_colored(c)))
         .collect::<Vec<_>>()
         .join(" ")
 }
@@ -133,10 +201,16 @@ fn format_card_box(card_str: &str) -> String {
 /// Formats the status line for a hand.
 fn format_hand_status(state: &GameState, hand_index: usize, hand: &Hand) -> String {
     if hand.is_blackjack() {
+        if is_color_enabled() {
+            return "BLACKJACK!".green().bold().to_string();
+        }
         return "BLACKJACK!".to_string();
     }
 
     if hand.is_bust() {
+        if is_color_enabled() {
+            return "BUST!".red().bold().to_string();
+        }
         return "BUST!".to_string();
     }
 
@@ -190,26 +264,61 @@ fn format_outcomes(state: &GameState) -> String {
             "".to_string()
         };
 
-        let outcome_str = match outcome.outcome {
-            Outcome::Win => "WIN!",
-            Outcome::Lose => "LOSE",
-            Outcome::Push => "PUSH",
-            Outcome::Blackjack => "BLACKJACK!",
-            Outcome::Bust => "BUST",
-            Outcome::Surrender => "SURRENDER",
+        let outcome_str = if is_color_enabled() {
+            match outcome.outcome {
+                Outcome::Win => "WIN!".green().bold().to_string(),
+                Outcome::Lose => "LOSE".red().to_string(),
+                Outcome::Push => "PUSH".yellow().to_string(),
+                Outcome::Blackjack => "BLACKJACK!".green().bold().to_string(),
+                Outcome::Bust => "BUST".red().to_string(),
+                Outcome::Surrender => "SURRENDER".yellow().to_string(),
+            }
+        } else {
+            match outcome.outcome {
+                Outcome::Win => "WIN!",
+                Outcome::Lose => "LOSE",
+                Outcome::Push => "PUSH",
+                Outcome::Blackjack => "BLACKJACK!",
+                Outcome::Bust => "BUST",
+                Outcome::Surrender => "SURRENDER",
+            }
+            .to_string()
         };
 
         let payout_str = if outcome.payout > 0.0 {
-            format!("+{:.1}x", outcome.payout)
+            if is_color_enabled() {
+                format!("+{:.1}x", outcome.payout).green().to_string()
+            } else {
+                format!("+{:.1}x", outcome.payout)
+            }
         } else if outcome.payout < 0.0 {
-            format!("{:.1}x", outcome.payout)
+            if is_color_enabled() {
+                format!("{:.1}x", outcome.payout).red().to_string()
+            } else {
+                format!("{:.1}x", outcome.payout)
+            }
         } else {
             "0x".to_string()
         };
 
+        // Calculate visible widths for padding
+        let outcome_visible = strip_ansi_codes(&outcome_str);
+        let payout_visible = strip_ansi_codes(&payout_str);
+        let hand_label_len = hand_label.len();
+
+        let total_content = hand_label_len + outcome_visible.len() + payout_visible.len();
+        let spacing = if 37 > total_content {
+            37 - total_content
+        } else {
+            1
+        };
+
         lines.push_str(&format!(
-            "│  {}{:<20} {:<13}│\n",
-            hand_label, outcome_str, payout_str
+            "│  {}{}{}{}│\n",
+            hand_label,
+            outcome_str,
+            " ".repeat(spacing),
+            payout_str
         ));
     }
 
@@ -245,9 +354,18 @@ mod tests {
 
     #[test]
     fn test_pretty_output() {
+        set_color_enabled(false);
         let state = GameState::new(GameConfig::default());
         let output = format_game_state(&state, OutputFormat::Pretty);
         assert!(output.contains("BLACKJACK"));
         assert!(output.contains("Dealer"));
+    }
+
+    #[test]
+    fn test_color_toggle() {
+        set_color_enabled(true);
+        assert!(is_color_enabled());
+        set_color_enabled(false);
+        assert!(!is_color_enabled());
     }
 }

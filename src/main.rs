@@ -10,7 +10,8 @@ use std::time::Duration;
 use clap::{Parser, Subcommand};
 
 use blackjack::{
-    decide_action, format_game_state, Action, GameConfig, GameState, OutputFormat, Strategy,
+    decide_action, format_game_state, set_color_enabled, Action, GameConfig, GameState,
+    OutputFormat, Strategy,
 };
 
 #[derive(Parser)]
@@ -19,6 +20,10 @@ use blackjack::{
 #[command(version)]
 #[command(about = "A Unix-philosophy blackjack game", long_about = None)]
 struct Cli {
+    /// Disable colored output
+    #[arg(long, global = true)]
+    no_color: bool,
+
     #[command(subcommand)]
     command: Commands,
 }
@@ -135,6 +140,11 @@ enum Commands {
 fn main() {
     let cli = Cli::parse();
 
+    // Handle --no-color flag
+    if cli.no_color {
+        set_color_enabled(false);
+    }
+
     let result = match cli.command {
         Commands::New {
             format,
@@ -233,18 +243,20 @@ fn cmd_play(config_path: Option<&str>, seed: Option<u64>) -> Result<(), String> 
         println!("{}", format_game_state(&state, OutputFormat::Pretty));
 
         if state.is_finished() {
-            print!("Play again? (y/n): ");
+            print!("Play again? (Y/n): ");
             io::stdout().flush().ok();
 
             let mut input = String::new();
             io::stdin().read_line(&mut input).ok();
 
-            if input.trim().to_lowercase() == "y" {
+            let response = input.trim().to_lowercase();
+            // Default to yes - only quit on explicit 'n'
+            if response == "n" || response == "no" || response == "q" {
+                break;
+            } else {
                 state = GameState::new(state.config.clone());
                 state.apply(Action::Deal).map_err(|e| e.to_string())?;
                 continue;
-            } else {
-                break;
             }
         }
 
