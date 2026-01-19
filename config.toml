@@ -1,0 +1,29 @@
+# Blackjack Configuration - Vegas Strip Rules
+# This is the default configuration used when no --config is specified
+
+# Deck Configuration
+num_decks = 6
+reshuffle_threshold = 0.25
+
+# Dealer Rules
+dealer_stands_soft_17 = true
+dealer_peeks = true
+
+# Player Options
+allow_double = true
+double_on = "any"  # "any", "hard_9_to_11", "hard_10_or_11", "hard_11_only"
+allow_double_after_split = true
+allow_split = true
+max_splits = 4
+allow_resplit_aces = false
+allow_hit_split_aces = false
+allow_surrender = true
+surrender_type = "late"  # "none", "late", "early"
+allow_insurance = true
+
+# Payouts
+blackjack_pays = 1.5  # 3:2 = 1.5, 6:5 = 1.2
+insurance_pays = 2.0  # 2:1
+
+# Special Rules
+five_card_charlie = false
