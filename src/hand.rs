@@ -48,7 +48,9 @@ impl Hand {
     /// Calculates the best value of the hand.
     /// Aces are counted as 11 unless that would bust, then as 1.
     pub fn value(&self) -> u8 {
-        let mut total: u8 = self.cards.iter().map(|c| c.value()).sum();
+        let mut total = self.cards.iter().fold(0u16, |total, card| {
+            total.saturating_add(u16::from(card.value()))
+        });
         let mut aces = self.cards.iter().filter(|c| c.rank == Rank::Ace).count();
 
         // Reduce aces from 11 to 1 as needed to avoid busting
@@ -57,20 +59,22 @@ impl Hand {
             aces -= 1;
         }
 
-        total
+        total.min(u16::from(u8::MAX)) as u8
     }
 
     /// Returns true if the hand is "soft" (has an ace counted as 11).
     pub fn is_soft(&self) -> bool {
-        let hard_total: u8 = self
-            .cards
-            .iter()
-            .map(|c| if c.rank == Rank::Ace { 1 } else { c.value() })
-            .sum();
+        let hard_total = self.cards.iter().fold(0u16, |total, card| {
+            total.saturating_add(if card.rank == Rank::Ace {
+                1
+            } else {
+                u16::from(card.value())
+            })
+        });
         let aces = self.cards.iter().filter(|c| c.rank == Rank::Ace).count();
 
         // If adding 10 to hard total (for one ace as 11) doesn't bust, it's soft
-        aces > 0 && hard_total + 10 <= 21
+        aces > 0 && hard_total.saturating_add(10) <= 21
     }
 
     /// Returns true if the hand has busted (value > 21).
@@ -106,6 +110,11 @@ impl Hand {
     /// Returns whether this hand came from a split.
     pub fn is_split(&self) -> bool {
         self.is_split
+    }
+
+    /// Marks the hand as coming from a split.
+    pub fn set_split(&mut self) {
+        self.is_split = true;
     }
 
     /// Returns whether this hand has been doubled down.
@@ -290,5 +299,17 @@ mod tests {
         assert_eq!(hand.len(), 5);
         assert_eq!(hand.value(), 16);
         assert!(!hand.is_bust());
+    }
+
+    #[test]
+    fn test_large_deserialized_hand_does_not_overflow() {
+        let mut hand = Hand::new();
+        for _ in 0..30 {
+            hand.add_card(card(Rank::King, Suit::Spades));
+        }
+
+        assert_eq!(hand.value(), u8::MAX);
+        assert!(hand.is_bust());
+        assert!(!hand.is_soft());
     }
 }

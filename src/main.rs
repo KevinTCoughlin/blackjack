@@ -8,10 +8,12 @@ use std::thread;
 use std::time::Duration;
 
 use clap::{Parser, Subcommand};
+use rand::SeedableRng;
+use rand_chacha::ChaCha8Rng;
 
 use blackjack::{
-    decide_action, format_game_state, set_color_enabled, Action, GameConfig, GameState,
-    OutputFormat, Strategy,
+    decide_action, decide_action_with_rng, format_game_state, set_color_enabled, Action,
+    GameConfig, GameState, OutputFormat, Strategy,
 };
 
 #[derive(Parser)]
@@ -105,7 +107,7 @@ enum Commands {
     /// Demo mode - automated play with basic strategy
     Demo {
         /// Number of games to play
-        #[arg(short = 'n', long, default_value = "1")]
+        #[arg(short = 'n', long, default_value = "1", value_parser = clap::value_parser!(u32).range(1..))]
         count: u32,
 
         /// Delay between actions in milliseconds (for visual demos)
@@ -225,8 +227,9 @@ fn cmd_action(action: Action, format: &str) -> Result<(), String> {
 
 fn cmd_play(config_path: Option<&str>, seed: Option<u64>) -> Result<(), String> {
     let config = load_config(config_path)?;
+    let mut current_seed = seed;
 
-    let mut state = match seed {
+    let mut state = match current_seed {
         Some(s) => GameState::with_seed(config, s),
         None => GameState::new(config),
     };
@@ -254,7 +257,11 @@ fn cmd_play(config_path: Option<&str>, seed: Option<u64>) -> Result<(), String> 
             if response == "n" || response == "no" || response == "q" {
                 break;
             } else {
-                state = GameState::new(state.config.clone());
+                current_seed = current_seed.map(|value| value.wrapping_add(1));
+                state = match current_seed {
+                    Some(seed) => GameState::with_seed(state.config.clone(), seed),
+                    None => GameState::new(state.config.clone()),
+                };
                 state.apply(Action::Deal).map_err(|e| e.to_string())?;
                 continue;
             }
@@ -336,6 +343,7 @@ fn cmd_demo(
             Some(s) => GameState::with_seed(config.clone(), s),
             None => GameState::new(config.clone()),
         };
+        let mut strategy_rng = game_seed.map(ChaCha8Rng::seed_from_u64);
 
         if verbose {
             println!("=== Game {} ===", game_num + 1);
@@ -343,7 +351,11 @@ fn cmd_demo(
 
         // Play the game
         while !state.is_finished() {
-            if let Some(action) = decide_action(&state, strategy) {
+            let action = match strategy_rng.as_mut() {
+                Some(rng) => decide_action_with_rng(&state, strategy, rng),
+                None => decide_action(&state, strategy),
+            };
+            if let Some(action) = action {
                 if verbose {
                     println!("{}", format_game_state(&state, OutputFormat::Pretty));
                     println!("Action: {:?}", action);
@@ -353,10 +365,7 @@ fn cmd_demo(
                     }
                 }
 
-                if let Err(e) = state.apply(action) {
-                    eprintln!("Error: {}", e);
-                    break;
-                }
+                state.apply(action).map_err(|e| e.to_string())?;
             } else {
                 break;
             }
@@ -385,7 +394,10 @@ fn cmd_demo(
 
     // Print statistics
     let total_hands = wins + losses + pushes;
-    println!("=== Statistics ({} games, {} hands) ===", count, total_hands);
+    println!(
+        "=== Statistics ({} games, {} hands) ===",
+        count, total_hands
+    );
     println!(
         "Wins:       {} ({:.1}%)",
         wins,
@@ -451,10 +463,7 @@ fn cmd_rules(config_path: Option<&str>) -> Result<(), String> {
             "No"
         }
     );
-    println!(
-        "  Split: {}",
-        if config.allow_split { "Yes" } else { "No" }
-    );
+    println!("  Split: {}", if config.allow_split { "Yes" } else { "No" });
     println!("  Max splits: {} hands", config.max_splits);
     println!(
         "  Resplit aces: {}",
@@ -483,16 +492,8 @@ fn cmd_rules(config_path: Option<&str>) -> Result<(), String> {
     );
     println!();
     println!("Payouts:");
-    println!(
-        "  Blackjack pays: {}:1 ({:.1}x)",
-        if config.blackjack_pays == 1.5 {
-            "3:2"
-        } else {
-            "6:5"
-        },
-        config.blackjack_pays
-    );
-    println!("  Insurance pays: 2:1 ({:.1}x)", config.insurance_pays);
+    println!("  Blackjack pays: {:.2}:1", config.blackjack_pays);
+    println!("  Insurance pays: {:.2}:1", config.insurance_pays);
     println!();
     println!("Special Rules:");
     println!(

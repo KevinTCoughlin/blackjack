@@ -27,6 +27,9 @@ pub enum GameError {
 
     #[error("Deck exhausted")]
     DeckExhausted,
+
+    #[error("Invalid game state: {0}")]
+    InvalidState(String),
 }
 
 /// The current phase of the game.
@@ -181,6 +184,8 @@ impl GameState {
 
     /// Applies an action to the game state.
     pub fn apply(&mut self, action: Action) -> Result<(), GameError> {
+        self.validate_state()?;
+
         match (&self.phase, &action) {
             (GamePhase::Betting, Action::Deal) => self.deal(),
             (GamePhase::Insurance, Action::Insurance(accept)) => self.handle_insurance(*accept),
@@ -206,7 +211,9 @@ impl GameState {
             GamePhase::Insurance => vec![Action::Insurance(true), Action::Insurance(false)],
 
             GamePhase::PlayerTurn { hand_index } => {
-                let hand = &self.player_hands[*hand_index];
+                let Some(hand) = self.player_hands.get(*hand_index) else {
+                    return vec![];
+                };
                 let mut actions = vec![Action::Hit, Action::Stand];
 
                 // Check if double is allowed
@@ -306,16 +313,19 @@ impl GameState {
 
     /// Deals initial cards.
     fn deal(&mut self) -> Result<(), GameError> {
+        // Check if deck needs reshuffling
+        if self.deck.needs_reshuffle() {
+            self.deck.reshuffle();
+        }
+        if self.deck.remaining() < 4 {
+            return Err(GameError::DeckExhausted);
+        }
+
         self.player_hands.clear();
         self.dealer_hand = Hand::new();
         self.outcomes.clear();
         self.insurance_bet = false;
         self.dealer_has_blackjack = None;
-
-        // Check if deck needs reshuffling
-        if self.deck.needs_reshuffle() {
-            self.deck.reshuffle();
-        }
 
         // Create player hand
         let mut player_hand = Hand::new();
@@ -338,6 +348,12 @@ impl GameState {
         if self.config.allow_insurance && self.dealer_upcard().rank == Rank::Ace {
             self.phase = GamePhase::Insurance;
         } else {
+            self.peek_for_blackjack();
+            if self.dealer_has_blackjack == Some(true) {
+                self.phase = GamePhase::Finished;
+                self.calculate_outcomes();
+                return Ok(());
+            }
             self.check_initial_blackjacks()?;
         }
 
@@ -358,19 +374,25 @@ impl GameState {
     fn handle_insurance(&mut self, accept: bool) -> Result<(), GameError> {
         self.insurance_bet = accept;
 
-        // Check for dealer blackjack if peek is enabled
-        if self.config.dealer_peeks {
-            self.dealer_has_blackjack = Some(self.dealer_hand.is_blackjack());
-
-            if self.dealer_hand.is_blackjack() {
-                // Dealer has blackjack - game ends
-                self.phase = GamePhase::Finished;
-                self.calculate_outcomes();
-                return Ok(());
-            }
+        self.peek_for_blackjack();
+        if self.dealer_has_blackjack == Some(true) {
+            self.phase = GamePhase::Finished;
+            self.calculate_outcomes();
+            return Ok(());
         }
 
         self.check_initial_blackjacks()
+    }
+
+    fn peek_for_blackjack(&mut self) {
+        if self.config.dealer_peeks
+            && matches!(
+                self.dealer_upcard().rank,
+                Rank::Ace | Rank::Ten | Rank::Jack | Rank::Queen | Rank::King
+            )
+        {
+            self.dealer_has_blackjack = Some(self.dealer_hand.is_blackjack());
+        }
     }
 
     /// Checks for initial blackjacks after dealing.
@@ -395,17 +417,18 @@ impl GameState {
         let card = self.draw_card()?;
         self.player_hands[hand_index].add_card(card);
 
-        // Check if hand is complete
-        if self.player_hands[hand_index].is_bust() || self.player_hands[hand_index].value() == 21 {
-            self.advance_to_next_hand(hand_index);
+        let is_charlie = self.config.five_card_charlie
+            && self.player_hands[hand_index].len() >= 5
+            && !self.player_hands[hand_index].is_bust();
+
+        if is_charlie {
+            self.player_hands[hand_index].set_standing();
         }
 
-        // Check for five card charlie
-        if self.config.five_card_charlie
-            && self.player_hands[hand_index].len() >= 5
-            && !self.player_hands[hand_index].is_bust()
+        if self.player_hands[hand_index].is_bust()
+            || self.player_hands[hand_index].value() == 21
+            || is_charlie
         {
-            self.player_hands[hand_index].set_standing();
             self.advance_to_next_hand(hand_index);
         }
 
@@ -443,6 +466,9 @@ impl GameState {
                 "Splitting not allowed in this situation".to_string(),
             ));
         }
+        if self.deck.remaining() < 2 {
+            return Err(GameError::DeckExhausted);
+        }
 
         // Take one card from the current hand
         let split_card = self.player_hands[hand_index]
@@ -459,9 +485,7 @@ impl GameState {
 
         self.player_hands[hand_index].add_card(card1);
         self.player_hands[hand_index + 1].add_card(card2);
-
-        // Mark current hand as from split
-        // (Note: The original hand needs to be marked too, but Hand::take_first_card doesn't do this)
+        self.player_hands[hand_index].set_split();
 
         // If splitting aces and no hit allowed, stand immediately
         if split_card.rank == Rank::Ace && !self.config.allow_hit_split_aces {
@@ -545,13 +569,17 @@ impl GameState {
 
         let dealer_value = self.dealer_hand.value();
         let dealer_bust = self.dealer_hand.is_bust();
-        let dealer_blackjack = self.dealer_has_blackjack.unwrap_or(self.dealer_hand.is_blackjack());
+        let dealer_blackjack = self
+            .dealer_has_blackjack
+            .unwrap_or(self.dealer_hand.is_blackjack());
 
         for (i, hand) in self.player_hands.iter().enumerate() {
             let outcome = if hand.is_surrendered() {
                 Outcome::Surrender
             } else if hand.is_bust() {
                 Outcome::Bust
+            } else if self.config.five_card_charlie && hand.len() >= 5 {
+                Outcome::Win
             } else if hand.is_blackjack() && !dealer_blackjack {
                 Outcome::Blackjack
             } else if dealer_blackjack && !hand.is_blackjack() {
@@ -587,11 +615,46 @@ impl GameState {
 
         // Handle insurance payout
         if self.insurance_bet {
-            if dealer_blackjack {
-                // Insurance pays 2:1
-                // This is separate from the hand outcome
+            if let Some(outcome) = self.outcomes.first_mut() {
+                outcome.payout += if dealer_blackjack {
+                    self.config.insurance_pays / 2.0
+                } else {
+                    -0.5
+                };
             }
-            // Insurance bet lost is already factored into not getting payout
+        }
+    }
+
+    fn validate_state(&self) -> Result<(), GameError> {
+        match self.phase {
+            GamePhase::Betting | GamePhase::Finished => Ok(()),
+            GamePhase::Insurance => {
+                if self.player_hands.len() == 1 && self.dealer_hand.len() == 2 {
+                    Ok(())
+                } else {
+                    Err(GameError::InvalidState(
+                        "insurance requires one player hand and two dealer cards".to_string(),
+                    ))
+                }
+            }
+            GamePhase::PlayerTurn { hand_index } => {
+                if hand_index < self.player_hands.len() && self.dealer_hand.len() >= 2 {
+                    Ok(())
+                } else {
+                    Err(GameError::InvalidState(format!(
+                        "player hand index {hand_index} is out of bounds"
+                    )))
+                }
+            }
+            GamePhase::DealerTurn => {
+                if self.dealer_hand.len() >= 2 {
+                    Ok(())
+                } else {
+                    Err(GameError::InvalidState(
+                        "dealer turn requires two dealer cards".to_string(),
+                    ))
+                }
+            }
         }
     }
 
@@ -617,9 +680,14 @@ impl GameState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::card::Suit;
 
     fn setup_game() -> GameState {
         GameState::with_seed(GameConfig::default(), 12345)
+    }
+
+    fn card(rank: Rank, suit: Suit) -> Card {
+        Card::new(rank, suit)
     }
 
     #[test]
@@ -717,5 +785,128 @@ mod tests {
         assert_eq!(Outcome::Push.payout_multiplier(&config), 0.0);
         assert_eq!(Outcome::Lose.payout_multiplier(&config), -1.0);
         assert_eq!(Outcome::Surrender.payout_multiplier(&config), -0.5);
+    }
+
+    #[test]
+    fn test_dealer_peeks_for_blackjack_with_ten_upcard() {
+        let seed = (0..100_000)
+            .find(|seed| {
+                let mut deck = Deck::with_seed(6, *seed);
+                let player_card_1 = deck.draw().unwrap();
+                let dealer_hole = deck.draw().unwrap();
+                let player_card_2 = deck.draw().unwrap();
+                let dealer_upcard = deck.draw().unwrap();
+
+                let mut player = Hand::new();
+                player.add_card(player_card_1);
+                player.add_card(player_card_2);
+                let mut dealer = Hand::new();
+                dealer.add_card(dealer_hole);
+                dealer.add_card(dealer_upcard);
+
+                dealer_upcard.value() == 10 && dealer.is_blackjack() && !player.is_blackjack()
+            })
+            .expect("a suitable deterministic shuffle");
+
+        let mut game = GameState::with_seed(GameConfig::default(), seed);
+        game.apply(Action::Deal).unwrap();
+
+        assert!(game.is_finished());
+        assert_eq!(game.dealer_has_blackjack, Some(true));
+        assert_eq!(game.outcomes[0].outcome, Outcome::Lose);
+    }
+
+    #[test]
+    fn test_both_split_hands_are_marked_as_split() {
+        let mut game = (0..100_000)
+            .find_map(|seed| {
+                let mut game = GameState::with_seed(GameConfig::default(), seed);
+                game.apply(Action::Deal).unwrap();
+                if matches!(game.phase, GamePhase::Insurance) {
+                    game.apply(Action::Insurance(false)).unwrap();
+                }
+                game.available_actions()
+                    .contains(&Action::Split)
+                    .then_some(game)
+            })
+            .expect("a suitable deterministic shuffle");
+
+        game.apply(Action::Split).unwrap();
+
+        assert!(game.player_hands[0].is_split());
+        assert!(game.player_hands[1].is_split());
+    }
+
+    #[test]
+    fn test_five_card_charlie_beats_higher_dealer_hand() {
+        let config = GameConfig {
+            five_card_charlie: true,
+            ..GameConfig::default()
+        };
+        let mut game = GameState::with_seed(config, 1);
+
+        let mut player = Hand::new();
+        player.add_card(card(Rank::Two, Suit::Spades));
+        player.add_card(card(Rank::Three, Suit::Hearts));
+        player.add_card(card(Rank::Four, Suit::Diamonds));
+        player.add_card(card(Rank::Five, Suit::Clubs));
+        player.add_card(card(Rank::Two, Suit::Hearts));
+        game.player_hands = vec![player];
+
+        game.dealer_hand.add_card(card(Rank::Ten, Suit::Spades));
+        game.dealer_hand.add_card(card(Rank::Eight, Suit::Hearts));
+        game.calculate_outcomes();
+
+        assert_eq!(game.outcomes[0].outcome, Outcome::Win);
+        assert_eq!(game.outcomes[0].payout, 1.0);
+    }
+
+    #[test]
+    fn test_insurance_is_included_in_net_payout() {
+        let mut game = setup_game();
+        let mut player = Hand::new();
+        player.add_card(card(Rank::Ten, Suit::Spades));
+        player.add_card(card(Rank::Nine, Suit::Hearts));
+        game.player_hands = vec![player];
+        game.dealer_hand.add_card(card(Rank::Ace, Suit::Clubs));
+        game.dealer_hand.add_card(card(Rank::King, Suit::Diamonds));
+        game.insurance_bet = true;
+        game.dealer_has_blackjack = Some(true);
+
+        game.calculate_outcomes();
+
+        assert_eq!(game.outcomes[0].outcome, Outcome::Lose);
+        assert_eq!(game.outcomes[0].payout, 0.0);
+    }
+
+    #[test]
+    fn test_invalid_player_hand_index_returns_error() {
+        let mut game = setup_game();
+        game.phase = GamePhase::PlayerTurn { hand_index: 99 };
+
+        let error = game.apply(Action::Hit).unwrap_err();
+
+        assert!(matches!(error, GameError::InvalidState(_)));
+        assert!(game.available_actions().is_empty());
+    }
+
+    #[test]
+    fn test_failed_split_does_not_mutate_hands() {
+        let mut game = setup_game();
+        while game.deck.draw().is_some() {}
+
+        let mut pair = Hand::new();
+        pair.add_card(card(Rank::Eight, Suit::Spades));
+        pair.add_card(card(Rank::Eight, Suit::Hearts));
+        game.player_hands = vec![pair];
+        game.dealer_hand.add_card(card(Rank::Ten, Suit::Clubs));
+        game.dealer_hand.add_card(card(Rank::Seven, Suit::Diamonds));
+        game.phase = GamePhase::PlayerTurn { hand_index: 0 };
+
+        let error = game.apply(Action::Split).unwrap_err();
+
+        assert!(matches!(error, GameError::DeckExhausted));
+        assert_eq!(game.player_hands.len(), 1);
+        assert_eq!(game.player_hands[0].len(), 2);
     }
 }

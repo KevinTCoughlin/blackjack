@@ -74,7 +74,7 @@ impl Deck {
             let mut rng = ChaCha8Rng::seed_from_u64(seed);
             remaining.shuffle(&mut rng);
         } else {
-            let mut rng = rand::thread_rng();
+            let mut rng = rand::rng();
             remaining.shuffle(&mut rng);
         }
     }
@@ -93,8 +93,11 @@ impl Deck {
 
     /// Checks if the deck needs reshuffling based on the threshold.
     pub fn needs_reshuffle(&self) -> bool {
-        let remaining = self.cards.len() - self.dealt;
+        let remaining = self.cards.len().saturating_sub(self.dealt);
         let total = self.cards.len();
+        if total == 0 || self.dealt > total {
+            return true;
+        }
         (remaining as f32 / total as f32) <= self.reshuffle_threshold
     }
 
@@ -105,7 +108,7 @@ impl Deck {
 
     /// Returns the number of cards remaining in the deck.
     pub fn remaining(&self) -> usize {
-        self.cards.len() - self.dealt
+        self.cards.len().saturating_sub(self.dealt)
     }
 
     /// Returns the total number of cards in the deck.

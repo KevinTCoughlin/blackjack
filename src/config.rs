@@ -62,7 +62,7 @@ pub enum SurrenderType {
 
 /// Game configuration with all blackjack rules.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(default)]
+#[serde(default, deny_unknown_fields)]
 pub struct GameConfig {
     // Deck configuration
     /// Number of decks in the shoe (1-8)
@@ -184,13 +184,13 @@ impl GameConfig {
             ));
         }
 
-        if self.blackjack_pays <= 0.0 {
+        if !self.blackjack_pays.is_finite() || self.blackjack_pays <= 0.0 {
             return Err(ConfigError::ValidationError(
                 "blackjack_pays must be positive".to_string(),
             ));
         }
 
-        if self.insurance_pays <= 0.0 {
+        if !self.insurance_pays.is_finite() || self.insurance_pays <= 0.0 {
             return Err(ConfigError::ValidationError(
                 "insurance_pays must be positive".to_string(),
             ));
@@ -234,6 +234,18 @@ mod tests {
     fn test_invalid_num_decks() {
         let toml = "num_decks = 10";
         let result = GameConfig::from_toml(toml);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rejects_unknown_fields() {
+        let result = GameConfig::from_toml("number_of_decks = 1");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_rejects_non_finite_payouts() {
+        let result = GameConfig::from_toml("blackjack_pays = nan");
         assert!(result.is_err());
     }
 

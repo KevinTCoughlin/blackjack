@@ -49,9 +49,9 @@ bj new
 # Pipe state through actions
 bj new | bj hit | bj stand
 
-# Save/restore game state
+# Save/restore game state without truncating the input before it is read
 bj new > game.json
-bj hit < game.json > game.json
+bj hit < game.json > game.next.json && mv game.next.json game.json
 bj stand < game.json
 ```
 
@@ -102,14 +102,14 @@ bj new -f pretty
 | `bj demo` | Automated play with basic strategy |
 | `bj rules` | Display current rules |
 
-### Global Options
+### Common Options
 
 | Option | Description |
 |--------|-------------|
-| `--no-color` | Disable colored output |
-| `-f, --format` | Output format: `json` (default) or `pretty` |
-| `-c, --config` | Path to TOML config file |
-| `--seed` | Seed for reproducible shuffling |
+| `--no-color` | Disable colored output (global; place before the command) |
+| `-f, --format` | Output format for stateless commands: `json` (default) or `pretty` |
+| `-c, --config` | TOML config for `new`, `play`, `demo`, and `rules` |
+| `--seed` | Reproducible shuffle for `new`, `play`, and `demo` |
 
 ## Configuration
 
@@ -140,7 +140,7 @@ bj play --config=vegas.toml
 | `dealer_stands_soft_17` | true | Dealer stands on soft 17 |
 | `dealer_peeks` | true | Dealer peeks for blackjack |
 | `allow_double` | true | Allow double down |
-| `double_on` | "any" | "any", "9_to_11", "10_or_11", "11_only" |
+| `double_on` | "any" | "any", "hard_9_to_11", "hard_10_or_11", "hard_11_only" |
 | `allow_double_after_split` | true | Allow double after split |
 | `allow_split` | true | Allow splitting pairs |
 | `max_splits` | 4 | Maximum hands from splits |

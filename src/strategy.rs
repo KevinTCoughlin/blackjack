@@ -33,6 +33,16 @@ impl std::str::FromStr for Strategy {
 
 /// Decides the next action based on the strategy.
 pub fn decide_action(state: &GameState, strategy: Strategy) -> Option<Action> {
+    let mut rng = rand::rng();
+    decide_action_with_rng(state, strategy, &mut rng)
+}
+
+/// Decides the next action using the supplied random number generator.
+pub fn decide_action_with_rng<R: rand::Rng + ?Sized>(
+    state: &GameState,
+    strategy: Strategy,
+    rng: &mut R,
+) -> Option<Action> {
     let actions = state.available_actions();
     if actions.is_empty() {
         return None;
@@ -40,7 +50,7 @@ pub fn decide_action(state: &GameState, strategy: Strategy) -> Option<Action> {
 
     match strategy {
         Strategy::Basic => basic_strategy_action(state, &actions),
-        Strategy::Random => random_action(&actions),
+        Strategy::Random => random_action(&actions, rng),
         Strategy::NeverBust => never_bust_action(state, &actions),
     }
 }
@@ -63,10 +73,8 @@ fn basic_strategy_action(state: &GameState, actions: &[Action]) -> Option<Action
     let dealer_value = dealer_upcard.value();
 
     // Check for pair splitting
-    if hand.is_pair() && actions.contains(&Action::Split) {
-        if should_split(hand, dealer_value) {
-            return Some(Action::Split);
-        }
+    if hand.is_pair() && actions.contains(&Action::Split) && should_split(hand, dealer_value) {
+        return Some(Action::Split);
     }
 
     let player_value = hand.value();
@@ -93,19 +101,19 @@ fn should_split(hand: &Hand, dealer_value: u8) -> bool {
         Rank::Ten | Rank::Jack | Rank::Queen | Rank::King | Rank::Five => false,
 
         // Split twos and threes vs 2-7
-        Rank::Two | Rank::Three => dealer_value >= 2 && dealer_value <= 7,
+        Rank::Two | Rank::Three => (2..=7).contains(&dealer_value),
 
         // Split fours vs 5-6
-        Rank::Four => dealer_value >= 5 && dealer_value <= 6,
+        Rank::Four => (5..=6).contains(&dealer_value),
 
         // Split sixes vs 2-6
-        Rank::Six => dealer_value >= 2 && dealer_value <= 6,
+        Rank::Six => (2..=6).contains(&dealer_value),
 
         // Split sevens vs 2-7
-        Rank::Seven => dealer_value >= 2 && dealer_value <= 7,
+        Rank::Seven => (2..=7).contains(&dealer_value),
 
         // Split nines vs 2-9 except 7
-        Rank::Nine => dealer_value >= 2 && dealer_value <= 9 && dealer_value != 7,
+        Rank::Nine => (2..=9).contains(&dealer_value) && dealer_value != 7,
     }
 }
 
@@ -124,8 +132,7 @@ fn soft_hand_strategy(
     // Soft 18
     if player_value == 18 {
         // Double vs 3-6
-        if can_double && dealer_value >= 3 && dealer_value <= 6 && actions.contains(&Action::Double)
-        {
+        if can_double && (3..=6).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         // Stand vs 2, 7, 8
@@ -139,26 +146,23 @@ fn soft_hand_strategy(
     // Soft 17
     if player_value == 17 {
         // Double vs 3-6
-        if can_double && dealer_value >= 3 && dealer_value <= 6 && actions.contains(&Action::Double)
-        {
+        if can_double && (3..=6).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         return Some(Action::Hit);
     }
 
     // Soft 15-16: Double vs 4-6, else hit
-    if player_value >= 15 && player_value <= 16 {
-        if can_double && dealer_value >= 4 && dealer_value <= 6 && actions.contains(&Action::Double)
-        {
+    if (15..=16).contains(&player_value) {
+        if can_double && (4..=6).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         return Some(Action::Hit);
     }
 
     // Soft 13-14: Double vs 5-6, else hit
-    if player_value >= 13 && player_value <= 14 {
-        if can_double && dealer_value >= 5 && dealer_value <= 6 && actions.contains(&Action::Double)
-        {
+    if (13..=14).contains(&player_value) {
+        if can_double && (5..=6).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         return Some(Action::Hit);
@@ -180,8 +184,8 @@ fn hard_hand_strategy(
     }
 
     // 13-16: Stand vs 2-6, hit vs 7+
-    if player_value >= 13 && player_value <= 16 {
-        if dealer_value >= 2 && dealer_value <= 6 {
+    if (13..=16).contains(&player_value) {
+        if (2..=6).contains(&dealer_value) {
             return Some(Action::Stand);
         }
         return Some(Action::Hit);
@@ -189,7 +193,7 @@ fn hard_hand_strategy(
 
     // 12: Stand vs 4-6, hit otherwise
     if player_value == 12 {
-        if dealer_value >= 4 && dealer_value <= 6 {
+        if (4..=6).contains(&dealer_value) {
             return Some(Action::Stand);
         }
         return Some(Action::Hit);
@@ -205,11 +209,7 @@ fn hard_hand_strategy(
 
     // 10: Double vs 2-9
     if player_value == 10 {
-        if can_double
-            && dealer_value >= 2
-            && dealer_value <= 9
-            && actions.contains(&Action::Double)
-        {
+        if can_double && (2..=9).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         return Some(Action::Hit);
@@ -217,11 +217,7 @@ fn hard_hand_strategy(
 
     // 9: Double vs 3-6
     if player_value == 9 {
-        if can_double
-            && dealer_value >= 3
-            && dealer_value <= 6
-            && actions.contains(&Action::Double)
-        {
+        if can_double && (3..=6).contains(&dealer_value) && actions.contains(&Action::Double) {
             return Some(Action::Double);
         }
         return Some(Action::Hit);
@@ -232,8 +228,8 @@ fn hard_hand_strategy(
 }
 
 /// Random strategy for testing.
-fn random_action(actions: &[Action]) -> Option<Action> {
-    use rand::seq::SliceRandom;
+fn random_action<R: rand::Rng + ?Sized>(actions: &[Action], rng: &mut R) -> Option<Action> {
+    use rand::prelude::IndexedRandom;
 
     // Filter out insurance - randomly decide
     let filtered: Vec<_> = actions
@@ -244,14 +240,13 @@ fn random_action(actions: &[Action]) -> Option<Action> {
 
     if filtered.is_empty() {
         // Must be insurance decision
-        if rand::random() {
+        if rng.random() {
             Some(Action::Insurance(true))
         } else {
             Some(Action::Insurance(false))
         }
     } else {
-        let mut rng = rand::thread_rng();
-        filtered.choose(&mut rng).cloned()
+        filtered.choose(rng).cloned()
     }
 }
 
@@ -302,7 +297,10 @@ mod tests {
         let mut state = GameState::with_seed(GameConfig::default(), 99999);
         state.apply(Action::Deal).unwrap();
 
-        if state.available_actions().contains(&Action::Insurance(false)) {
+        if state
+            .available_actions()
+            .contains(&Action::Insurance(false))
+        {
             let action = decide_action(&state, Strategy::Basic);
             assert_eq!(action, Some(Action::Insurance(false)));
         }
