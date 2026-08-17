@@ -63,7 +63,10 @@ fn format_pretty(state: &GameState) -> String {
 
     // Dealer hand
     let dealer_str = format_dealer_hand(state);
-    output.push_str(&format!("│  Dealer: {:<31}│\n", strip_ansi_for_padding(&dealer_str, 31)));
+    output.push_str(&format!(
+        "│  Dealer: {:<31}│\n",
+        strip_ansi_for_padding(&dealer_str, 31)
+    ));
 
     // Dealer value
     let dealer_value = if state.is_finished() || matches!(state.phase, GamePhase::DealerTurn) {
@@ -110,11 +113,7 @@ fn format_pretty(state: &GameState) -> String {
 fn strip_ansi_for_padding(s: &str, width: usize) -> String {
     // Count visible characters (excluding ANSI escape sequences)
     let visible_len = strip_ansi_codes(s).chars().count();
-    let padding = if width > visible_len {
-        width - visible_len
-    } else {
-        0
-    };
+    let padding = width.saturating_sub(visible_len);
     format!("{}{}", s, " ".repeat(padding))
 }
 
@@ -238,15 +237,15 @@ fn format_actions(state: &GameState) -> String {
 
     let action_strs: Vec<&str> = actions
         .iter()
-        .filter_map(|a| match a {
-            crate::game::Action::Hit => Some("[H]it"),
-            crate::game::Action::Stand => Some("[S]tand"),
-            crate::game::Action::Double => Some("[D]ouble"),
-            crate::game::Action::Split => Some("[P]split"),
-            crate::game::Action::Surrender => Some("[U]surrender"),
-            crate::game::Action::Insurance(true) => Some("[Y]es ins"),
-            crate::game::Action::Insurance(false) => Some("[N]o ins"),
-            crate::game::Action::Deal => Some("[Enter] Deal"),
+        .map(|a| match a {
+            crate::game::Action::Hit => "[H]it",
+            crate::game::Action::Stand => "[S]tand",
+            crate::game::Action::Double => "[D]ouble",
+            crate::game::Action::Split => "[P]split",
+            crate::game::Action::Surrender => "[U]surrender",
+            crate::game::Action::Insurance(true) => "[Y]es ins",
+            crate::game::Action::Insurance(false) => "[N]o ins",
+            crate::game::Action::Deal => "[Enter] Deal",
         })
         .collect();
 
