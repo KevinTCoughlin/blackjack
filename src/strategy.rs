@@ -230,6 +230,7 @@ fn hard_hand_strategy(
 /// Random strategy for testing.
 fn random_action<R: rand::Rng + ?Sized>(actions: &[Action], rng: &mut R) -> Option<Action> {
     use rand::prelude::IndexedRandom;
+    use rand::RngExt;
 
     // Filter out insurance - randomly decide
     let filtered: Vec<_> = actions
