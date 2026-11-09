@@ -2,7 +2,6 @@
 
 A Unix-philosophy blackjack game with a stateless CLI.
 
-[![Crates.io](https://img.shields.io/crates/v/blackjack.svg)](https://crates.io/crates/blackjack)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 [![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/Q5Q11SKIOF)
@@ -18,11 +17,14 @@ A Unix-philosophy blackjack game with a stateless CLI.
 
 ## Installation
 
+This crate isn't published to crates.io (the `blackjack` crate there is an
+unrelated project), so install from this repository:
+
 ```bash
-cargo install blackjack
+cargo install --git https://github.com/KevinTCoughlin/blackjack
 ```
 
-Or build from source:
+Or build from a local clone:
 
 ```bash
 git clone https://github.com/KevinTCoughlin/blackjack.git
