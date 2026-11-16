@@ -304,11 +304,7 @@ impl GameState {
         let hand = &self.player_hands[hand_index];
 
         // Can only surrender on first two cards of first hand
-        if hand_index != 0 || hand.len() != 2 || hand.is_split() {
-            return false;
-        }
-
-        true
+        hand_index == 0 && hand.len() == 2 && !hand.is_split()
     }
 
     /// Deals initial cards.
